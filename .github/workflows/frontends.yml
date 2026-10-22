@@ -1,0 +1,38 @@
+name: Verify and build frontends
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-frontends:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out source code
+        uses: actions/checkout@v6
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Check formatting, types, behavior and production builds
+        run: npm run verify
+      - name: Upload storefront build
+        uses: actions/upload-artifact@v4
+        with:
+          name: storefront-dist
+          path: apps/storefront/dist/
+          if-no-files-found: error
+      - name: Upload character explorer build
+        uses: actions/upload-artifact@v4
+        with:
+          name: character-explorer-dist
+          path: apps/character-explorer/dist/
+          if-no-files-found: error

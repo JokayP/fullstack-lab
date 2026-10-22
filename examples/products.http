@@ -1,0 +1,32 @@
+@baseUrl = http://localhost:8080
+@productId = 1
+
+### List all products
+GET {{baseUrl}}/api/products
+
+### Search products by name
+GET {{baseUrl}}/api/products?name=back
+
+### Get one product
+GET {{baseUrl}}/api/products/{{productId}}
+
+### Create a product; use the returned ID for subsequent requests
+POST {{baseUrl}}/api/products
+Content-Type: application/json
+
+{"name":"Ruler","price":1.25,"stock":10}
+
+### Update every editable field
+PUT {{baseUrl}}/api/products/{{productId}}
+Content-Type: application/json
+
+{"name":"Large ruler","price":1.75,"stock":12}
+
+### Delete a product
+DELETE {{baseUrl}}/api/products/{{productId}}
+
+### Invalid input: expect HTTP 400
+POST {{baseUrl}}/api/products
+Content-Type: application/json
+
+{"name":"","price":-1,"stock":-2}
