@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import type { FormEvent } from 'react';
 import {
   ArrowLeft,
   ArrowRight,
@@ -14,7 +13,7 @@ import { CharacterCard } from './components/CharacterCard';
 import { CharacterDialog } from './components/CharacterDialog';
 import { SearchLoading } from './components/SearchLoading';
 import { initialFilters, useCharacterSearch } from './hooks/use-character-search';
-import type { Character, StatusFilter } from './types/character';
+import type { CharacterDetails, StatusFilter } from './types/character';
 
 const statusOptions: Array<{ value: StatusFilter; label: string; color: string }> = [
   { value: '', label: 'All life forms', color: '' },
@@ -26,14 +25,14 @@ const statusOptions: Array<{ value: StatusFilter; label: string; color: string }
 export default function App() {
   const [name, setName] = useState('');
   const [status, setStatus] = useState<StatusFilter>('');
-  const [selected, setSelected] = useState<Character | null>(null);
+  const [selected, setSelected] = useState<CharacterDetails | null>(null);
   const { state, filters, search, retry } = useCharacterSearch();
   const data = state.phase === 'success' ? state.data : null;
   const loading = state.phase === 'loading';
 
-  function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    search({ name, status, page: 1 });
+  function changeName(value: string) {
+    setName(value);
+    search({ name: value, status, page: 1 }, { debounce: true });
   }
 
   function reset() {
@@ -136,8 +135,8 @@ export default function App() {
           className="mx-auto max-w-7xl scroll-mt-4 px-6 pb-16 sm:px-10"
           aria-labelledby="directory-title"
         >
-          <form
-            onSubmit={submit}
+          <div
+            role="search"
             className="rounded-xl border border-line bg-panel p-4 sm:p-5"
             aria-label="Character search"
           >
@@ -151,7 +150,7 @@ export default function App() {
                   aria-label="Search characters by name"
                   type="search"
                   value={name}
-                  onChange={(event) => setName(event.target.value)}
+                  onChange={(event) => changeName(event.target.value)}
                   placeholder="Search the multiverse. Try Rick, Morty, or Summer..."
                   className="h-12 w-full rounded-lg border border-line bg-void pl-12 pr-10 text-sm placeholder:text-[#7e8a80]"
                 />
@@ -160,18 +159,12 @@ export default function App() {
                     type="button"
                     aria-label="Clear character name"
                     className="absolute right-3 top-3 rounded p-1 text-muted hover:text-white"
-                    onClick={() => setName('')}
+                    onClick={() => changeName('')}
                   >
                     <X size={17} />
                   </button>
                 )}
               </div>
-              <button
-                type="submit"
-                className="flex h-12 items-center justify-center gap-5 rounded-lg bg-portal px-6 text-sm font-bold text-void transition hover:bg-[#dbf6ad]"
-              >
-                Open portal <ArrowRight size={17} />
-              </button>
             </div>
             <div className="mt-4 flex flex-wrap items-center justify-between gap-4">
               <div className="flex flex-wrap gap-2" role="group" aria-label="Filter by life status">
@@ -189,7 +182,7 @@ export default function App() {
                 ))}
               </div>
             </div>
-          </form>
+          </div>
           <div className="flex flex-wrap items-end justify-between gap-3 pb-6 pt-9">
             <div>
               <p className="mb-2 font-mono text-[9px] uppercase tracking-[.2em] text-muted">

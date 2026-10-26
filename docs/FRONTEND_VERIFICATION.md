@@ -1,5 +1,19 @@
 # Fullstack Lab verification record
 
+## Portal update: 2026-10-25
+
+`npm run verify` passed after the related-endpoint update: formatting, strict TypeScript, **42 tests across 9 files**, and both production builds.
+
+New coverage verifies automatic input search without Enter, a cancellable 300 ms debounce inside the four-second minimum, resets to page 1, clearing the input, filters/pagination, and delayed results until the full character/location/episode operation completes. Service tests verify deduplicated batches, ID-based joins with out-of-order responses, single-object responses, unknown locations, missing/duplicate/unexpected IDs, invalid fields and references, related HTTP failures and stale episode cancellation.
+
+Live browser verification against the public API confirmed that typing `Rick Sanchez` without submitting shows generic loading feedback, then four matching characters. Opening character #001 displayed Earth (C-137), Dimension C-137, Citadel of Ricks, location types/resident counts, and 51 episode appearances with names, episode codes and air dates. The interface contains no search-duration announcement. [Related-data screenshot](screenshots/portal-related-details.png).
+
+The new dialog was also inspected at a 390 x 844 viewport. Document client/scroll widths were both 375 px and dialog client/scroll widths were both 326 px, without horizontal overflow. No browser warning/error entries were observed. Exact timing boundaries are verified with automated fake-clock tests rather than screenshot timing.
+
+The store and Java backend are unchanged by this update. The eight Java tests and store persistence checks below are historical evidence from the previous verification, not a new backend run.
+
+## Original verification: 2026-10-22
+
 Date: 2026-10-22 (America/Guayaquil).
 
 ## Automated checks

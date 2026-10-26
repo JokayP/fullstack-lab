@@ -1,13 +1,13 @@
 import { useEffect, useRef } from 'react';
 import { X } from 'lucide-react';
-import type { Character } from '../types/character';
+import type { CharacterDetails, LocationRecord } from '../types/character';
 import { CharacterImage, statusClasses } from './CharacterCard';
 
 export function CharacterDialog({
   character,
   onClose,
 }: {
-  character: Character | null;
+  character: CharacterDetails | null;
   onClose: () => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
@@ -21,7 +21,7 @@ export function CharacterDialog({
       onCancel={onClose}
       onClose={onClose}
       aria-labelledby="character-name"
-      className="m-auto max-h-[88dvh] w-[calc(100%-2rem)] max-w-xl overflow-y-auto rounded-2xl border border-line bg-panel p-0 text-white backdrop:bg-black/75"
+      className="m-auto max-h-[88dvh] w-[calc(100%-2rem)] max-w-2xl overflow-y-auto rounded-2xl border border-line bg-panel p-0 text-white backdrop:bg-black/75"
     >
       {character && (
         <>
@@ -53,10 +53,8 @@ export function CharacterDialog({
               </p>
               <dl className="mt-5 space-y-4 text-sm">
                 {[
-                  ['Origin', character.origin.name],
-                  ['Last known location', character.location.name],
                   ['Gender', character.gender],
-                  ['Episode appearances', character.episode.length],
+                  ['Episode appearances', character.episodes.length],
                 ].map(([label, value]) => (
                   <div key={label}>
                     <dt className="mb-1 text-xs text-muted">{label}</dt>
@@ -66,8 +64,71 @@ export function CharacterDialog({
               </dl>
             </div>
           </div>
+          <div className="grid gap-4 px-6 pb-6 sm:grid-cols-2">
+            <LocationDetails
+              title="Origin"
+              location={character.originDetails}
+              fallbackName={character.origin.name}
+            />
+            <LocationDetails
+              title="Last known location"
+              location={character.locationDetails}
+              fallbackName={character.location.name}
+            />
+          </div>
+          <section aria-labelledby="episodes-title" className="border-t border-line p-6">
+            <h3 id="episodes-title" className="mb-4 text-lg font-semibold">
+              Episode appearances <span className="text-portal">/ {character.episodes.length}</span>
+            </h3>
+            {character.episodes.length === 0 ? (
+              <p className="text-sm text-muted">No recorded episodes.</p>
+            ) : (
+              <ol className="space-y-3">
+                {character.episodes.map((episode) => (
+                  <li key={episode.id} className="rounded-lg border border-line bg-void p-4">
+                    <p className="font-mono text-[11px] text-portal">{episode.episode}</p>
+                    <p className="mt-1 text-sm font-medium">{episode.name}</p>
+                    <p className="mt-1 text-xs text-muted">Aired {episode.air_date}</p>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </section>
         </>
       )}
     </dialog>
+  );
+}
+
+function LocationDetails({
+  title,
+  location,
+  fallbackName,
+}: {
+  title: string;
+  location: LocationRecord | null;
+  fallbackName: string;
+}) {
+  return (
+    <section className="min-w-0 rounded-xl border border-line bg-void p-4">
+      <h3 className="text-xs text-muted">{title}</h3>
+      <p className="mt-2 break-words text-sm font-semibold">{location?.name ?? fallbackName}</p>
+      {location ? (
+        <dl className="mt-3 space-y-2 text-xs">
+          {[
+            ['Type', location.type || 'unknown'],
+            ['Dimension', location.dimension || 'unknown'],
+            ['Known residents', location.residents.length],
+          ].map(([label, value]) => (
+            <div key={label}>
+              <dt className="text-muted">{label}</dt>
+              <dd className="mt-1 break-words">{value}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : (
+        <p className="mt-3 text-xs text-muted">No location record is available.</p>
+      )}
+    </section>
   );
 }

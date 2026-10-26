@@ -1,13 +1,15 @@
 import { useEffect, useState } from 'react';
-import { fetchCharacters } from '../services/characters-api';
+import { fetchCharacterDirectory } from '../services/character-directory';
 import type { SearchFilters, SearchState } from '../types/character';
-import { SEARCH_DELAY_MS, withMinimumDuration } from '../utils/minimum-duration';
+import { SEARCH_DELAY_MS, wait, withMinimumDuration } from '../utils/minimum-duration';
 
 export const REQUEST_TIMEOUT_MS = 15000;
+export const SEARCH_DEBOUNCE_MS = 300;
 export const initialFilters: SearchFilters = { name: '', status: '', page: 1 };
 
 export function useCharacterSearch() {
-  const [filters, setFilters] = useState<SearchFilters>(initialFilters);
+  const [request, setRequest] = useState({ filters: initialFilters, debounce: false });
+  const { filters } = request;
   const [state, setState] = useState<SearchState>({ phase: 'loading' });
 
   useEffect(() => {
@@ -20,7 +22,10 @@ export function useCharacterSearch() {
     );
 
     withMinimumDuration(
-      () => fetchCharacters(filters, controller.signal),
+      async () => {
+        if (request.debounce) await wait(SEARCH_DEBOUNCE_MS, controller.signal);
+        return fetchCharacterDirectory(filters, controller.signal);
+      },
       SEARCH_DELAY_MS,
       controller.signal,
     )
@@ -37,18 +42,25 @@ export function useCharacterSearch() {
               : 'We could not reach the multiverse. Check your internet connection and try again.';
         setState({ phase: 'error', message });
       })
-      .finally(() => clearTimeout(timeout));
+      .finally(() => {
+        clearTimeout(timeout);
+        // A failed relationship must not leave its sibling request running.
+        controller.abort();
+      });
 
     return () => {
       active = false;
       clearTimeout(timeout);
       controller.abort();
     };
-  }, [filters]);
+  }, [request]);
 
-  function search(nextFilters: SearchFilters) {
+  function search(nextFilters: SearchFilters, options: { debounce?: boolean } = {}) {
     setState({ phase: 'loading' });
-    setFilters({ ...nextFilters, name: nextFilters.name.trim() });
+    setRequest({
+      filters: { ...nextFilters, name: nextFilters.name.trim() },
+      debounce: options.debounce ?? false,
+    });
   }
 
   return { state, filters, search, retry: () => search(filters) };

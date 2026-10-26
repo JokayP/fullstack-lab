@@ -1,6 +1,7 @@
 import { act, renderHook } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { REQUEST_TIMEOUT_MS, useCharacterSearch } from './use-character-search';
+import { episodes, jsonResponse, locations, rick } from '../test/fixtures';
 
 const emptyResponse = {
   ok: true,
@@ -8,6 +9,88 @@ const emptyResponse = {
 };
 
 describe('search lifecycle', () => {
+  it('aborts an in-flight join and ignores its late episode response after a new query', async () => {
+    vi.useFakeTimers();
+    let resolveEpisodes!: (response: ReturnType<typeof jsonResponse>) => void;
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ info: { count: 1, pages: 1 }, results: [rick] }))
+      .mockResolvedValueOnce(jsonResponse(locations))
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveEpisodes = resolve;
+          }),
+      )
+      .mockResolvedValue(emptyResponse);
+    vi.stubGlobal('fetch', fetchMock);
+    const { result } = renderHook(() => useCharacterSearch());
+    await act(() => vi.advanceTimersByTimeAsync(1000));
+    const oldSignal = fetchMock.mock.calls[2]![1].signal as AbortSignal;
+    expect(oldSignal.aborted).toBe(false);
+    act(() => result.current.search({ name: 'Summer', status: '', page: 1 }, { debounce: true }));
+    expect(oldSignal.aborted).toBe(true);
+    await act(() => vi.advanceTimersByTimeAsync(4000));
+    expect(result.current.state).toMatchObject({ phase: 'success', data: { results: [] } });
+    await act(async () => {
+      resolveEpisodes(jsonResponse(episodes));
+    });
+    expect(result.current.state).toMatchObject({ phase: 'success', data: { results: [] } });
+  });
+
+  it('debounces typing, resets the four-second clock and only requests the latest name', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn().mockResolvedValue(emptyResponse);
+    vi.stubGlobal('fetch', fetchMock);
+    const { result } = renderHook(() => useCharacterSearch());
+    await act(() => vi.advanceTimersByTimeAsync(4000));
+    fetchMock.mockClear();
+    act(() => result.current.search({ name: 'R', status: '', page: 1 }, { debounce: true }));
+    await act(() => vi.advanceTimersByTimeAsync(200));
+    act(() => result.current.search({ name: 'Rick', status: '', page: 1 }, { debounce: true }));
+    await act(() => vi.advanceTimersByTimeAsync(299));
+    expect(fetchMock).not.toHaveBeenCalled();
+    await act(() => vi.advanceTimersByTimeAsync(1));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect((fetchMock.mock.calls[0]![0] as URL).searchParams.get('name')).toBe('Rick');
+    await act(() => vi.advanceTimersByTimeAsync(3699));
+    expect(result.current.state.phase).toBe('loading');
+    await act(() => vi.advanceTimersByTimeAsync(1));
+    expect(result.current.state.phase).toBe('success');
+  });
+
+  it('waits for slow episode data after four seconds and cancels related requests on a new search', async () => {
+    vi.useFakeTimers();
+    let resolveEpisodes!: (response: ReturnType<typeof jsonResponse>) => void;
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ info: { count: 1, pages: 1 }, results: [rick] }))
+      .mockResolvedValueOnce(jsonResponse(locations))
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveEpisodes = resolve;
+          }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+    const { result, unmount } = renderHook(() => useCharacterSearch());
+    await act(() => vi.advanceTimersByTimeAsync(4000));
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(result.current.state.phase).toBe('loading');
+    await act(() => vi.advanceTimersByTimeAsync(1000));
+    await act(async () => {
+      resolveEpisodes(jsonResponse(episodes));
+    });
+    expect(result.current.state.phase).toBe('success');
+    const relationSignal = fetchMock.mock.calls[2]![1].signal as AbortSignal;
+    fetchMock.mockResolvedValue(emptyResponse);
+    act(() => result.current.search({ name: 'Summer', status: '', page: 1 }, { debounce: true }));
+    expect(relationSignal.aborted).toBe(true);
+    unmount();
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it('keeps loading for four seconds and passes pagination and filters', async () => {
     vi.useFakeTimers();
     const fetchMock = vi.fn().mockResolvedValue(emptyResponse);

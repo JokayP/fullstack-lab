@@ -1,5 +1,5 @@
-import { ArrowUpRight, MapPin } from 'lucide-react';
-import type { Character, CharacterStatus } from '../types/character';
+import { ArrowUpRight, Clapperboard, MapPin } from 'lucide-react';
+import type { Character, CharacterDetails, CharacterStatus } from '../types/character';
 import { useState } from 'react';
 
 export const statusClasses: Record<CharacterStatus, string> = {
@@ -41,8 +41,8 @@ export function CharacterCard({
   character,
   onSelect,
 }: {
-  character: Character;
-  onSelect: (character: Character) => void;
+  character: CharacterDetails;
+  onSelect: (character: CharacterDetails) => void;
 }) {
   return (
     <article
@@ -79,7 +79,25 @@ export function CharacterCard({
         </button>
         <p className="mt-4 flex items-start gap-1.5 border-t border-line pt-3 text-[11px] text-muted">
           <MapPin size={13} className="mt-0.5 shrink-0" />
-          <span className="line-clamp-1">{character.location.name}</span>
+          <span>
+            <span className="line-clamp-1 text-white">
+              {character.locationDetails?.name ?? character.location.name}
+            </span>
+            <span className="mt-1 line-clamp-1">
+              {character.locationDetails?.dimension || 'Unknown dimension'}
+            </span>
+          </span>
+        </p>
+        <p className="mt-3 flex items-start gap-1.5 text-[11px] text-muted">
+          <Clapperboard size={13} className="mt-0.5 shrink-0" />
+          <span className="min-w-0">
+            <span className="block text-[10px]">First seen in</span>
+            <span className="mt-1 line-clamp-1 text-white">
+              {character.episodes[0]
+                ? `${character.episodes[0].episode} · ${character.episodes[0].name}`
+                : 'No recorded episodes'}
+            </span>
+          </span>
         </p>
       </div>
     </article>

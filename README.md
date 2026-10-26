@@ -2,12 +2,14 @@
 
 Two independent React + TypeScript + Tailwind CSS applications, with the original Spring Boot Products API:
 
-| Application  | Folder                  | Data                                                    | Search                                                     |
-| ------------ | ----------------------- | ------------------------------------------------------- | ---------------------------------------------------------- |
-| Paper & Form | apps/storefront         | Our Spring Boot backend and PostgreSQL or file-based H2 | Immediate filtering while typing, without Enter            |
-| Portal       | apps/character-explorer | Rick and Morty public API                               | Submitted search with a four-second minimum loading period |
+| Application  | Folder                  | Data                                                    | Search                                                                   |
+| ------------ | ----------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------ |
+| Paper & Form | apps/storefront         | Our Spring Boot backend and PostgreSQL or file-based H2 | Immediate filtering while typing, without Enter                          |
+| Portal       | apps/character-explorer | Rick and Morty characters, locations and episodes       | Automatic search while typing, with a four-second minimum loading period |
 
 Paper & Form is a small product catalog: cards, search, create, edit and confirmed deletion. Product names, prices and stock are saved to the database. There is no cart, checkout or payment flow. Portal stays independent of the local database and does not advertise its loading duration in the interface.
+
+Portal joins three REST resources in the frontend: it searches `/character`, retrieves the referenced `/location/{ids}` and `/episode/{ids}` records, then combines them by ID. Cards show location and first-episode details; the character dialog shows origin, dimension and all episode appearances. See the [Portal README](apps/character-explorer/README.md) for the request flow and timing contract.
 
 ## Start locally
 

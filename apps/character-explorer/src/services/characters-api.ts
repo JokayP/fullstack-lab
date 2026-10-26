@@ -1,12 +1,7 @@
 import type { Character, CharacterPage, SearchFilters } from '../types/character';
+import { createApiUrl, isRecord } from './api-client';
 
-const apiUrl =
-  import.meta.env.VITE_CHARACTERS_API_URL || 'https://rickandmortyapi.com/api/character';
 const emptyPage: CharacterPage = { info: { count: 0, pages: 0 }, results: [] };
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object';
-}
 
 function isCharacter(value: unknown): value is Character {
   return (
@@ -22,8 +17,10 @@ function isCharacter(value: unknown): value is Character {
     value.image.startsWith('https://') &&
     isRecord(value.origin) &&
     typeof value.origin.name === 'string' &&
+    typeof value.origin.url === 'string' &&
     isRecord(value.location) &&
     typeof value.location.name === 'string' &&
+    typeof value.location.url === 'string' &&
     Array.isArray(value.episode) &&
     value.episode.every((episode) => typeof episode === 'string')
   );
@@ -33,7 +30,7 @@ export async function fetchCharacters(
   filters: SearchFilters,
   signal: AbortSignal,
 ): Promise<CharacterPage> {
-  const url = new URL(apiUrl);
+  const url = createApiUrl('character');
   url.searchParams.set('page', String(filters.page));
   if (filters.name.trim()) url.searchParams.set('name', filters.name.trim());
   if (filters.status) url.searchParams.set('status', filters.status);

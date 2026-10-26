@@ -8,14 +8,40 @@ export interface Character {
   species: string;
   gender: string;
   image: string;
-  origin: { name: string };
-  location: { name: string };
+  origin: { name: string; url: string };
+  location: { name: string; url: string };
   episode: string[];
+}
+
+export interface LocationRecord {
+  id: number;
+  name: string;
+  type: string;
+  dimension: string;
+  residents: string[];
+}
+
+export interface Episode {
+  id: number;
+  name: string;
+  episode: string;
+  air_date: string;
+}
+
+export interface CharacterDetails extends Character {
+  originDetails: LocationRecord | null;
+  locationDetails: LocationRecord | null;
+  episodes: Episode[];
 }
 
 export interface CharacterPage {
   info: { count: number; pages: number };
   results: Character[];
+}
+
+export interface CharacterDirectoryPage {
+  info: CharacterPage['info'];
+  results: CharacterDetails[];
 }
 
 export interface SearchFilters {
@@ -25,5 +51,5 @@ export interface SearchFilters {
 }
 export type SearchState =
   | { phase: 'loading' }
-  | { phase: 'success'; data: CharacterPage }
+  | { phase: 'success'; data: CharacterDirectoryPage }
   | { phase: 'error'; message: string };
