@@ -53,7 +53,7 @@ The java/ runtime, local database and JAR files are not tracked in Git. A fresh 
 
 Run `npm run verify` for frontend formatting, strict types, tests and builds. Run `npm run format` to apply formatting. Each frontend builds to its own dist/ folder.
 
-With Java 21 configured, run `.\mvnw.cmd --batch-mode --no-transfer-progress clean verify` for the backend. The GitHub Actions workflows verify both parts and upload build artifacts; they do not deploy.
+With Java 21 configured, run `.\mvnw.cmd --batch-mode --no-transfer-progress clean verify` for the backend. The CI workflows verify both parts and upload build artifacts. The EC2 deployment workflow tests and packages a release, then deploys successful updates to `main` using the configured `production` environment. See the [EC2 deployment guide](docs/EC2_CONTINUOUS_DEPLOYMENT.md) for setup, temporary Academy credentials, and recovery details.
 
 Read the [verification record](docs/FRONTEND_VERIFICATION.md) and each app's README for implementation details and validation results. Code, comments and UI text are in English.
 
