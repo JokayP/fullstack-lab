@@ -121,10 +121,58 @@ Uploaded bundles remain in `/home/ec2-user/fullstack-deploy/`; previous versions
 remain in `/opt/fullstack-lab/rollback.*`. Check available disk space and remove
 obsolete versions only after verifying a successful release.
 
-Jira's **Branch created** and **Pull request created** rules already track
-development. Moving a card to **Done after deployment** requires an additional
-deployment integration/rule and must be verified separately. Merging into `dev`
-does not mean the application has been deployed.
+## Jira automation and release verification
+
+Work item: `SCRUM-6`.
+
+The WEB space uses Jira keys such as `SCRUM-6` to associate GitHub activity with
+work items. Keep the key in branch names, commit messages, and pull request titles.
+Configure the following rules in Jira's space automation settings:
+
+| Event                                           | Condition                                                 | Result                                                   |
+| ----------------------------------------------- | --------------------------------------------------------- | -------------------------------------------------------- |
+| Work item transitions from To Do to In Progress | No branch starts with `<issue-key>-`                      | Create `<issue-key>-work` from the current `dev` commit. |
+| Linked branch is created                        | Work item is To Do                                        | Move it to In Progress.                                  |
+| Linked pull request is created                  | Work item is In Progress                                  | Move it to In Review.                                    |
+| Linked deployment succeeds                      | Environment type is Production and work item is In Review | Move it to Done.                                         |
+
+For this personal GitHub repository, the first rule uses web requests instead of
+the organization-based Create branch in GitHub action. It checks matching branch
+references, requires HTTP 200 and an empty list, reads `refs/heads/dev`, requires
+HTTP 200 again, and creates the new reference with that commit SHA. HTTP 201
+confirms creation. Every request waits for its response before the next step.
+
+The write request uses a fine-grained token restricted to `fullstack-lab` with
+Contents read/write access. Store it only in the hidden Authorization header in
+Jira, using `Bearer <token>`. Renew the token and replace that header before it
+expires. Never put the token in this guide, Git commits, or audit-log messages.
+
+Keep the rule setting that allows other automation rules to trigger this rule
+disabled. A transition caused by the Branch created rule should not start another
+branch-creation run. The matching-reference check also skips creation when the
+same work item returns from To Do to In Progress and its branch still exists.
+
+Creating `SCRUM-6-work` by moving the card has been verified. The production-to-Done
+rule is configured; its end-to-end verification is still pending. Jira rules run
+on new events and do not retroactively process the previous deployment.
+
+Use this checklist to finish the verification:
+
+1. Commit this documentation change on `SCRUM-6-work`, staging only this file.
+2. Open a pull request to `dev` with `SCRUM-6` in its title. Confirm the card moves
+   to In Review and wait for all applicable checks to pass before merging.
+3. Keep the Academy lab running and refresh the temporary AWS credentials if
+   needed. Open a release pull request from `dev` to `main`, retaining `SCRUM-6`
+   in its title. Wait for checks, then merge using a merge commit.
+4. Confirm the production deployment succeeds, `/release.txt` matches the deployed
+   commit, both frontends work, and existing products remain available.
+5. Confirm SCRUM-6 moves to Done. If it does not, inspect the Jira automation audit
+   log and the work item's linked deployment before changing the rule.
+6. Record the pull requests, successful workflow run, and Jira audit result as
+   evidence on SCRUM-6. Only then mark this end-to-end check complete.
+
+Merging into `dev` does not deploy the application. A failed production deployment
+must not move the work item to Done.
 
 ## Local checks
 
