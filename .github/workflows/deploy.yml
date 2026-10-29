@@ -35,10 +35,12 @@ jobs:
           cache: npm
       - name: Check deployment scripts
         run: |
-          bash -n deploy/ec2/update.sh
-          bash -n deploy/ec2/github-deploy.sh
-          shellcheck deploy/ec2/update.sh deploy/ec2/github-deploy.sh tests/deployment-release.test.sh
+          for script in deploy/ec2/{update,github-deploy,github-deploy-alb,enable-private-database,export-app-node,install-app-node}.sh; do
+            bash -n "$script"
+          done
+          shellcheck deploy/ec2/{update,github-deploy,github-deploy-alb,enable-private-database,export-app-node,install-app-node}.sh tests/deployment-*.test.sh
           bash tests/deployment-release.test.sh
+          bash tests/deployment-alb.test.sh
       - name: Verify backend
         run: bash ./mvnw --batch-mode --no-transfer-progress clean verify
       - name: Verify frontends
@@ -76,7 +78,7 @@ jobs:
     needs: release
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 40
     environment:
       name: production
     env:
@@ -89,6 +91,11 @@ jobs:
       EC2_SECURITY_GROUP_ID: ${{ vars.EC2_SECURITY_GROUP_ID }}
       EC2_SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
       EC2_SSH_HOST_KEY: ${{ vars.EC2_SSH_HOST_KEY }}
+      EC2_SECONDARY_INSTANCE_ID: ${{ vars.EC2_SECONDARY_INSTANCE_ID }}
+      EC2_SECONDARY_SECURITY_GROUP_ID: ${{ vars.EC2_SECONDARY_SECURITY_GROUP_ID }}
+      EC2_SECONDARY_SSH_HOST_KEY: ${{ vars.EC2_SECONDARY_SSH_HOST_KEY }}
+      ALB_TARGET_GROUP_ARN: ${{ vars.ALB_TARGET_GROUP_ARN }}
+      ALB_DNS_NAME: ${{ vars.ALB_DNS_NAME }}
     steps:
       - name: Check out deployment tools
         uses: actions/checkout@v6
@@ -99,8 +106,8 @@ jobs:
         with:
           name: ec2-release-${{ github.sha }}
           path: target/ec2-bundle
-      - name: Deploy to the existing EC2 instance
-        run: bash deploy/ec2/github-deploy.sh target/ec2-bundle
-      - name: Remove temporary SSH access
+      - name: Deploy to both ALB targets sequentially
+        run: bash deploy/ec2/github-deploy-alb.sh target/ec2-bundle
+      - name: Restore target registration and remove temporary SSH access
         if: always()
-        run: bash deploy/ec2/github-deploy.sh --cleanup
+        run: bash deploy/ec2/github-deploy-alb.sh --cleanup
