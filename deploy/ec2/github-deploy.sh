@@ -1,10 +1,29 @@
 #!/usr/bin/env bash
 # Run only on a GitHub-hosted runner, using the production environment credentials.
 set -Eeuo pipefail
-state_dir="${RUNNER_TEMP:?This script requires a GitHub Actions runner}/fullstack-ec2"
+[[ ${DEPLOY_NODE_NAME:-single} =~ ^(single|primary|secondary)$ ]] || exit 1
+state_dir="${RUNNER_TEMP:?This script requires a GitHub Actions runner}/fullstack-ec2${DEPLOY_NODE_NAME:+-$DEPLOY_NODE_NAME}"
 
 cleanup() {
-    local result=0 rule_id
+    local result=0 rule_id target_id
+    if [[ -s "$state_dir/target-pending" ]]; then
+        target_id=$(cat "$state_dir/target-pending")
+        if [[ "$target_id" =~ ^i-[0-9a-f]+$ && -n ${ALB_TARGET_GROUP_ARN:-} ]]; then
+            if aws elbv2 register-targets --target-group-arn "$ALB_TARGET_GROUP_ARN" \
+                --targets "Id=$target_id,Port=80" \
+                && aws elbv2 wait target-in-service --target-group-arn "$ALB_TARGET_GROUP_ARN" \
+                    --targets "Id=$target_id,Port=80"; then
+                rm -f "$state_dir/target-pending"
+                echo "Target registered and healthy: $target_id"
+            else
+                echo "Target recovery needs attention: $target_id. Inspect target health before retrying." >&2
+                result=1
+            fi
+        else
+            echo 'Invalid target recovery state; inspect the target group.' >&2
+            result=1
+        fi
+    fi
     if [[ -s "$state_dir/rule-id" ]]; then
         rule_id=$(cat "$state_dir/rule-id")
         if [[ "$rule_id" =~ ^sgr-[0-9a-f]+$ ]]; then
@@ -126,18 +145,51 @@ remote_dir="/home/ec2-user/fullstack-deploy/$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
 ssh "${ssh_options[@]}" "$destination" "mkdir -p '$remote_dir' && chmod 700 '$remote_dir'"
 scp "${ssh_options[@]}" "$bundle_dir/bundle.tar.gz" "$bundle_dir/bundle.sha256" \
     "$bundle_dir/update.sh" "$destination:$remote_dir/"
+
+if [[ -n ${ALB_TARGET_GROUP_ARN:-} ]]; then
+    # Recheck immediately before draining; leave the peer serving traffic.
+    aws elbv2 describe-target-health --target-group-arn "$ALB_TARGET_GROUP_ARN" > "$state_dir/targets.json"
+    python3 - "$state_dir/targets.json" <<'PY'
+import json
+import os
+import sys
+
+with open(sys.argv[1], encoding='utf-8') as source:
+    targets = json.load(source)['TargetHealthDescriptions']
+current = os.environ['EC2_INSTANCE_ID']
+if not any(t['Target']['Id'] != current and t['Target'].get('Port') == 80
+           and t['TargetHealth']['State'] == 'healthy' for t in targets):
+    sys.exit('No healthy peer is available. Refusing to drain this instance.')
+PY
+    # Record intent first so cleanup also handles an ambiguous AWS response.
+    printf '%s\n' "$EC2_INSTANCE_ID" > "$state_dir/target-pending"
+    aws elbv2 deregister-targets --target-group-arn "$ALB_TARGET_GROUP_ARN" \
+        --targets "Id=$EC2_INSTANCE_ID,Port=80"
+    aws elbv2 wait target-deregistered --target-group-arn "$ALB_TARGET_GROUP_ARN" \
+        --targets "Id=$EC2_INSTANCE_ID,Port=80"
+fi
 # shellcheck disable=SC2029
 ssh "${ssh_options[@]}" "$destination" \
     "set -e; cd '$remote_dir'; sha256sum -c bundle.sha256; tar -xzf bundle.tar.gz; sudo -n bash ./update.sh ./release"
 
-for path in / /characters/ /api/products; do
-    curl -fsS --retry 3 --retry-delay 2 --max-time 15 "http://$host$path" >/dev/null
-done
-[[ $(curl -fsS --max-time 15 "http://$host/release.txt") == "$GITHUB_SHA" ]] || {
-    echo 'The public website did not return the expected Git revision.' >&2; exit 1;
+# update.sh checks both frontends and the API locally. Verify its revision over SSH
+# too: app instances need HTTP access only from the ALB, not from the runner.
+[[ $(ssh "${ssh_options[@]}" "$destination" 'curl -fsS --max-time 10 http://127.0.0.1/release.txt') == "$GITHUB_SHA" ]] || {
+    echo 'The instance did not return the expected Git revision.' >&2; exit 1;
 }
-if [[ -n ${GITHUB_STEP_SUMMARY:-} ]]; then
-    printf '## EC2 deployment\n\n- Revision: %s\n- Storefront: http://%s/\n- Characters: http://%s/characters/\n' \
-        "$GITHUB_SHA" "$host" "$host" >> "$GITHUB_STEP_SUMMARY"
+if [[ -n ${ALB_TARGET_GROUP_ARN:-} ]]; then
+    aws elbv2 register-targets --target-group-arn "$ALB_TARGET_GROUP_ARN" \
+        --targets "Id=$EC2_INSTANCE_ID,Port=80"
+    aws elbv2 wait target-in-service --target-group-arn "$ALB_TARGET_GROUP_ARN" \
+        --targets "Id=$EC2_INSTANCE_ID,Port=80"
+    rm -f "$state_dir/target-pending"
+else
+    for path in / /characters/ /api/products; do
+        curl -fsS --retry 3 --retry-delay 2 --max-time 15 "http://$host$path" >/dev/null
+    done
 fi
-echo "Public health checks passed for revision $GITHUB_SHA."
+if [[ -n ${GITHUB_STEP_SUMMARY:-} ]]; then
+    printf '## EC2 node deployment\n\n- Instance: %s\n- Revision: %s\n- Local application health checks passed.\n' \
+        "$EC2_INSTANCE_ID" "$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
+fi
+echo "Instance $EC2_INSTANCE_ID verified at revision $GITHUB_SHA."

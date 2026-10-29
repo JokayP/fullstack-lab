@@ -1,6 +1,6 @@
 # Continuous deployment to the existing EC2 lab
 
-Work item: `SCRUM-5`.
+Work items: `SCRUM-5` (initial deployment) and `SCRUM-7` (two-node deployment).
 
 Changes are developed on a Jira-linked branch, reviewed into `dev`, and released
 through a second pull request from `dev` into `main`. Only a push to `main` or a
@@ -13,11 +13,15 @@ manual run selected on `main` can reach the deployment job.
 3. Builds the production frontends with `VITE_PRODUCTS_API_URL=/api/products`.
 4. Packages a release and its SHA-256 checksum. Pull requests stop here.
 5. Downloads that same verified bundle in a separate `production` job.
-6. Uses the instance ID to find its current public IP and confirm it is running.
-7. Temporarily permits SSH from the current runner's single IPv4 address.
-8. Checks the server's pinned SSH host key, uploads the release, and runs `update.sh`.
-9. Checks the website, character explorer, API, and deployed Git revision.
-10. Removes the SSH rule created by this run, even after an ordinary failure.
+6. Requires exactly two healthy HTTP:80 targets and checks their VPC and security groups.
+7. Updates the secondary node first, then the primary. For each node, discovers
+   its current public IP, temporarily permits SSH from the runner's single IPv4
+   address, checks the pinned host key, and uploads the bundle.
+8. Rechecks peer health, drains the target from the ALB, and runs `update.sh`.
+9. Verifies the node's revision over SSH, registers it again, and waits for healthy
+   status before proceeding. The final check covers both targets and the ALB URLs.
+10. Attempts to restore target registration and remove this run's temporary SSH
+    rules on failure. One production job covers both nodes.
 
 The existing CI workflows continue to run. This workflow repeats the checks for
 the exact release it packages, so a successful unrelated or earlier workflow
@@ -49,12 +53,17 @@ expires. The workflow does not start the lab or create an EC2 instance.
 
 Add these **environment variables**:
 
-| Variable                | Value                                                             |
-| ----------------------- | ----------------------------------------------------------------- |
-| `AWS_REGION`            | The region shown in the EC2 console, for example `us-east-1`.     |
-| `EC2_INSTANCE_ID`       | The existing instance ID beginning with `i-`.                     |
-| `EC2_SECURITY_GROUP_ID` | A security group attached to that instance, beginning with `sg-`. |
-| `EC2_SSH_HOST_KEY`      | The instance's public SSH host key, captured as described below.  |
+| Variable                          | Value                                                               |
+| --------------------------------- | ------------------------------------------------------------------- |
+| `AWS_REGION`                      | The region shown in the EC2 console, for example `us-east-1`.       |
+| `EC2_INSTANCE_ID`                 | The existing instance ID beginning with `i-`.                       |
+| `EC2_SECURITY_GROUP_ID`           | A security group attached to that instance, beginning with `sg-`.   |
+| `EC2_SSH_HOST_KEY`                | The instance's public SSH host key, captured as described below.    |
+| `EC2_SECONDARY_INSTANCE_ID`       | The second application instance ID.                                 |
+| `EC2_SECONDARY_SECURITY_GROUP_ID` | A security group attached to the second instance.                   |
+| `EC2_SECONDARY_SSH_HOST_KEY`      | The second instance's public SSH host key.                          |
+| `ALB_TARGET_GROUP_ARN`            | The ARN of the HTTP:80 instance target group containing both nodes. |
+| `ALB_DNS_NAME`                    | The ALB DNS name, without `http://`, a port, or a path.             |
 
 Connect to the instance using the existing trusted SSH connection and run:
 
@@ -66,17 +75,25 @@ Copy that one public-key line into `EC2_SSH_HOST_KEY`. It starts with
 `ssh-ed25519`. This is the server's public identity, not the private login key.
 It normally remains the same when the same instance is stopped and started.
 Replacing the instance requires verifying and updating this value.
+Repeat this command on the second instance and save its own key in
+`EC2_SECONDARY_SSH_HOST_KEY`. Both nodes currently use the same login key pair;
+the public host keys identify two different servers.
 
 ## AWS prerequisites
 
-- Start the Academy lab and wait for the existing EC2 instance to be running.
-- The instance must have the original installation from `deploy/ec2/install.sh`,
-  with Nginx, `fullstack.service`, and PostgreSQL already working.
+- Start the Academy lab and wait for both EC2 instances to be running and healthy
+  in the ALB target group.
+- The primary must have the original installation from `deploy/ec2/install.sh`.
+  Both nodes need Nginx and `fullstack.service`; PostgreSQL stays on the primary.
 - The `ec2-user` account must retain its existing non-interactive sudo access.
-- The site must be reachable over public HTTP on port 80, as in the manual demo.
+- The ALB must be reachable over public HTTP on port 80. The app security group
+  permits HTTP from the ALB security group. Direct public HTTP to the nodes is
+  not required by the two-node deployment script.
 - The lab credentials must allow `ec2:DescribeInstances`,
   `ec2:AuthorizeSecurityGroupIngress`, and `ec2:RevokeSecurityGroupIngress` for
-  this instance's security group. Academy policies must be checked in the live lab.
+  both configured security groups. It also needs `elasticloadbalancing:DescribeTargetGroups`,
+  `elasticloadbalancing:DescribeTargetHealth`, `elasticloadbalancing:DeregisterTargets`,
+  and `elasticloadbalancing:RegisterTargets`. Check these permissions in the live lab.
 - Use a security group dedicated to this instance when possible. If the group is
   shared, the temporary port 22 rule also applies to other attached instances.
 
@@ -92,10 +109,10 @@ with `GitHub Actions` and matches that run number. Existing rules are not remove
 
 ## First release
 
-1. Review the SCRUM-5 changes in a pull request to `dev`. Keep its Jira key in the
+1. Review the deployment changes in a pull request to `dev`. Keep its Jira key in the
    pull request title. The release job must pass; deployment will be skipped.
 2. Configure the `production` environment and refresh the lab credentials.
-3. Start the lab, verify the EC2 website, and complete the AWS prerequisites.
+3. Start the lab, verify both healthy targets and the ALB website, and complete the AWS prerequisites.
 4. Open a pull request from `dev` to `main` and wait for the checks.
 5. Merge it. Open **Actions > Build release and deploy to EC2** to follow the run.
 6. Verify the URLs in the deployment job summary. `/release.txt` identifies the
@@ -109,13 +126,24 @@ failed workflow or use **Run workflow** on `main`. No public IP secret needs upd
 
 `update.sh` updates only the backend JAR and website files. It does not recreate
 the PostgreSQL container, delete its volume, or rewrite `/etc/fullstack-lab`.
-Deployment briefly stops the backend while replacing the JAR.
+Deployment briefly stops one backend while replacing its JAR. The other target
+continues serving traffic; the PostgreSQL container is not stopped by this update.
 
 Before replacement, it saves the previous JAR and website under
 `/opt/fullstack-lab/rollback.*`. If a server-side update or health check fails,
 it attempts to restore those files and restart the previous service; the run
 still fails. This is application-file recovery, not database-schema rollback.
 Changes that migrate schemas require a separate backup and migration plan.
+During a rolling release, old and new application versions coexist briefly and
+must remain compatible with the same database schema.
+
+If an update fails, the driver attempts to register that node again and waits
+for health before exiting with failure. It does not proceed to the other node.
+If a hard runner outage or expired credentials prevent recovery, inspect the
+target group, register the missing instance on port 80, and inspect its service
+logs if it remains unhealthy. Do not retry the rollout until both targets are
+healthy. A failure on the second updated node can leave different application
+revisions running; this is not an atomic two-node rollback.
 
 Uploaded bundles remain in `/home/ec2-user/fullstack-deploy/`; previous versions
 remain in `/opt/fullstack-lab/rollback.*`. Check available disk space and remove
@@ -152,11 +180,11 @@ disabled. A transition caused by the Branch created rule should not start anothe
 branch-creation run. The matching-reference check also skips creation when the
 same work item returns from To Do to In Progress and its branch still exists.
 
-Creating `SCRUM-6-work` by moving the card has been verified. The production-to-Done
-rule is configured; its end-to-end verification is still pending. Jira rules run
+Creating `SCRUM-6-work`, moving it to In Review on PR creation, and moving it to
+Done after deployment were verified during SCRUM-6. Jira rules run
 on new events and do not retroactively process the previous deployment.
 
-Use this checklist to finish the verification:
+Use this checklist when verifying a new release (substitute its Jira key):
 
 1. Commit this documentation change on `SCRUM-6-work`, staging only this file.
 2. Open a pull request to `dev` with `SCRUM-6` in its title. Confirm the card moves
@@ -179,11 +207,45 @@ must not move the work item to Done.
 ```bash
 bash -n deploy/ec2/update.sh
 bash -n deploy/ec2/github-deploy.sh
+bash -n deploy/ec2/github-deploy-alb.sh
 bash tests/deployment-release.test.sh
+bash tests/deployment-alb.test.sh
 ```
 
 These checks do not contact AWS. Full deployment, credential permissions, recovery,
 and database persistence still require verification against the running lab.
+
+## Two-node lab bootstrap and evidence
+
+The lab uses two app nodes in different availability zones, an internet-facing
+ALB listening on HTTP:80, and an instance target group with `/api/products` as its
+health-check path. Both applications use the PostgreSQL database on the primary's
+private address. This balances application traffic, but the database host remains
+a single point of failure; it is not a highly available database architecture.
+
+Bootstrap tools are manual administrative operations, not workflow steps:
+
+1. Attach a database security group to the primary allowing TCP:5432 only from
+   the app security group. Back up and inspect the database archive.
+2. Run `enable-private-database.sh` as root on the primary with its private IPv4
+   address. It preserves the named volume, publishes loopback and private ports,
+   and retains the old container stopped. Never start that old container while
+   the replacement is using the same volume.
+3. Run `export-app-node.sh` on the primary with that private IPv4 address. Transfer
+   its archive and checksum over SSH to the secondary's
+   `/home/ec2-user/fullstack-node-transfer/` directory.
+4. Run `install-app-node.sh` as root on the secondary. It installs the application
+   using the shared database, disables seed creation, and validates the schema.
+   It deletes the transferred archive after success. Remove the archive and
+   checksum from the source too: the archive contains database credentials.
+5. Register both nodes on port 80, attach the target group to the ALB, and wait
+   for two healthy targets before configuring the GitHub variables above.
+
+On October 29, 2026, both nodes were healthy and served revision
+`e3c1dc4df186c427f89f7a12675c4f82695be8d0`. A marked set of 20 ALB requests
+appeared in the Nginx logs as 10 requests on each node. This verifies traffic
+distribution. The new rolling deployment workflow still requires its first
+successful live run; simulated tests alone do not verify AWS permissions.
 
 ## References
 
